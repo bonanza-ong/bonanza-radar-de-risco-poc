@@ -1,0 +1,181 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  aws_bonanza_sam
+
+
+Globals:
+  Function:
+    Timeout: 900
+    Handler: app.lambda_handler
+    Runtime: python3.8
+    Architectures:
+      - x86_64
+    VpcConfig:
+      SubnetIds:
+        - subnet-0a710728fd2040930
+        - subnet-0e607b35ad4df6c93
+        - subnet-05e4c12eae6083367
+      SecurityGroupIds:
+        - !Ref RDSSecurityGroup
+  Api:
+    Cors:
+      AllowMethods: "'OPTIONS,DELETE,PUT,POST'"
+      AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+      AllowOrigin: "'*'"
+
+Resources:
+  # RDS Instance
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: '20'
+      DBName: bonanza_core
+      Engine: postgres
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBSecretName}:SecretString:password}}"
+      MultiAZ: False
+      PubliclyAccessible: True
+      StorageType: gp2
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      EnableIAMDatabaseAuthentication: True
+      
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable access to RDS
+      VpcId: vpc-089223a68f8143b22
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets available for the RDS DB Instance
+      SubnetIds: 
+        - subnet-0a710728fd2040930
+        - subnet-0e607b35ad4df6c93
+        - subnet-05e4c12eae6083367
+
+  # Secrets Manager Secret for RDS Password
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref DBSecretName
+      Description: "Secret para a senha do banco de dados PostgreSQL"
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DBUsername}"}'
+        GenerateStringKey: "password"
+        PasswordLength: 16
+        ExcludeCharacters: "\"@/\\"
+  
+  # S3 Bucket
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: bonanza_gis
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub "arn:aws:s3:::bonanza_gis/*"
+              - Effect: Allow
+                Action:
+                  - rds:*
+                  - secretsmanager:GetSecretValue
+                  - logs:*
+                Resource: "*"
+
+
+  ProcessShapefile:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: processar_area
+      CodeUri: aws_processar_area/
+      Events:
+        S3PutEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref S3Bucket
+            Events: s3:ObjectCreated:Put
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: area-risco/   
+
+
+  # API Gateway
+  ApiGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: v1
+      Auth:
+        ApiKeyRequired: true
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          Description: !Join [ " ", [ { "Ref": "AWS::StackName" }, "usage plan" ] ]
+          Quota:
+            Limit: 100000
+            Period: DAY
+          Throttle:
+            BurstLimit: 1000
+            RateLimit: 100
+          UsagePlanName: !Join [ "", [ { "Ref": "AWS::StackName" }, "-usage-plan" ] ]
+      Models:
+        EnderecoObj:
+          type: object
+          required:
+            - rua
+            - bairro
+            - numero
+            - cidade
+            - estado
+          properties:
+            rua:
+              type: string
+            bairro:
+              type: string
+            numero:
+              type: string
+            cidade:
+              type: string
+            estado:
+              type: string
+  EnderecoPost:
+      Type: AWS::Serverless::Function
+      Properties:
+        FunctionName: endereco_post
+        CodeUri: aws_endereco/
+        Events:
+          EnderecoPost:
+            Type: Api
+            Properties:
+              RequestModel:
+                Model: EnderecoObj
+                Required: true
+                ValidateBody: true
+              Path: /endereco
+              Method: post
+              RestApiId:
+                Ref: ApiGatewayApi
+              Auth:
+                ApiKeyRequired: true
