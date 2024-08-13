@@ -3,6 +3,14 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   aws_bonanza_sam
 
+Parameters:
+  DBSecretName:
+    Type: String
+    Description: Name of the database
+
+  DBUsername:
+    Type: String
+    Description: Name of the db user
 
 Globals:
   Function:
@@ -13,9 +21,12 @@ Globals:
       - x86_64
     VpcConfig:
       SubnetIds:
-        - subnet-0a710728fd2040930
-        - subnet-0e607b35ad4df6c93
-        - subnet-05e4c12eae6083367
+        - subnet-045ee7ea621d02c34
+        - subnet-0a62961c04f2048b4
+        - subnet-059cfc33ea93f60cf
+        - subnet-0a0d8d6b2660d8e60
+        - subnet-06aa872c7b94fa612
+        - subnet-03846faaf834448fb
       SecurityGroupIds:
         - !Ref RDSSecurityGroup
   Api:
@@ -31,7 +42,7 @@ Resources:
     Properties:
       DBInstanceClass: db.t3.micro
       AllocatedStorage: '20'
-      DBName: bonanza_core
+      DBName: bonanza_gis
       Engine: postgres
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBSecretName}:SecretString:password}}"
@@ -47,16 +58,19 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Enable access to RDS
-      VpcId: vpc-089223a68f8143b22
+      VpcId: vpc-0fa085959b86b6757
 
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: Subnets available for the RDS DB Instance
       SubnetIds: 
-        - subnet-0a710728fd2040930
-        - subnet-0e607b35ad4df6c93
-        - subnet-05e4c12eae6083367
+        - subnet-045ee7ea621d02c34
+        - subnet-0a62961c04f2048b4
+        - subnet-059cfc33ea93f60cf
+        - subnet-0a0d8d6b2660d8e60
+        - subnet-06aa872c7b94fa612
+        - subnet-03846faaf834448fb
 
   # Secrets Manager Secret for RDS Password
   RDSSecret:
@@ -74,7 +88,7 @@ Resources:
   S3Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: bonanza_gis
+      BucketName: bonanza-gis
 
   # Lambda Execution Role
   LambdaExecutionRole:
@@ -96,7 +110,7 @@ Resources:
                 Action:
                   - s3:GetObject
                   - s3:PutObject
-                Resource: !Sub "arn:aws:s3:::bonanza_gis/*"
+                Resource: !Sub "arn:aws:s3:::bonanza-gis/*"
               - Effect: Allow
                 Action:
                   - rds:*
