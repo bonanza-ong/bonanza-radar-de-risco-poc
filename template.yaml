@@ -19,16 +19,6 @@ Globals:
     Runtime: python3.8
     Architectures:
       - x86_64
-    VpcConfig:
-      SubnetIds:
-        - subnet-045ee7ea621d02c34
-        - subnet-0a62961c04f2048b4
-        - subnet-059cfc33ea93f60cf
-        - subnet-0a0d8d6b2660d8e60
-        - subnet-06aa872c7b94fa612
-        - subnet-03846faaf834448fb
-      SecurityGroupIds:
-        - !Ref RDSSecurityGroup
   Api:
     Cors:
       AllowMethods: "'OPTIONS,DELETE,PUT,POST'"
@@ -53,12 +43,18 @@ Resources:
         - !GetAtt RDSSecurityGroup.GroupId
       DBSubnetGroupName: !Ref DBSubnetGroup
       EnableIAMDatabaseAuthentication: True
-      
+
   RDSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Enable access to RDS
       VpcId: vpc-0fa085959b86b6757
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0  # Altera isso para um intervalo de IPs mais restrito, se necessário
+
 
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -108,14 +104,10 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                Resource: !Sub "arn:aws:s3:::bonanza-gis/*"
-              - Effect: Allow
-                Action:
                   - rds:*
                   - secretsmanager:GetSecretValue
                   - logs:*
+                  - s3:*
                 Resource: "*"
 
 
@@ -124,6 +116,15 @@ Resources:
     Properties:
       FunctionName: processar_area
       CodeUri: aws_processar_area/
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: 
+                - s3:GetObject
+                - s3:ListBucket
+              Resource: 
+                - arn:aws:s3:::bonanza-gis
+                - arn:aws:s3:::bonanza-gis/*
       Events:
         S3PutEvent:
           Type: S3
