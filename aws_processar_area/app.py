@@ -8,10 +8,11 @@ from botocore.exceptions import ClientError
 from urllib.parse import unquote_plus
 from datetime import datetime
 from shapely.geometry import MultiPolygon
+import uuid
 
 connection_bonanza_gis = os.environ.get("connection_bonanza_gis", "")
 
-def prepare_gdf(gdf):
+def prepare_gdf(gdf, area_code, file_key):
 
     area_risco_gdf = gdf['geometry'].unary_union
     if not isinstance(area_risco_gdf, MultiPolygon):
@@ -20,9 +21,9 @@ def prepare_gdf(gdf):
     if gdf.geometry.name != 'area_risco':
         gdf = gdf.rename_geometry('area_risco')
 
-    nome = 'Nome padrão'
+    nome = file_key
     em_risco = True
-    descricao = 'Descricao Inicial'
+    descricao = file_key
     created_at = datetime.utcnow()
 
     # Verifica e adiciona a coluna 'nome' se não existir
@@ -31,13 +32,14 @@ def prepare_gdf(gdf):
 
     # Verifica e adiciona a coluna 'descricao' se não existir
     if 'descricao' in gdf.columns:
-        descricao = 'Descrição padrão'
+        descricao = gdf.iloc[0]['descricao']
 
     new_gdf = gpd.GeoDataFrame({
         'nome': [nome],
         'em_risco':[em_risco],
         'descricao':[descricao],
         'created_at':[created_at],
+        'area_code':[area_code],
         'area_risco': [combined_geometry]
     })
 
@@ -81,6 +83,8 @@ def lambda_handler(event, context):
         else:
             extracted_files = [download_path]
 
+        area_code = str(uuid.uuid4())
+
         # Processa cada arquivo extraído
         for file_path in extracted_files:
             file_extension = os.path.splitext(file_path)[1].lower()
@@ -94,7 +98,7 @@ def lambda_handler(event, context):
                 continue  # Ignora arquivos com extensões não suportadas
 
             # Prepara o GeoDataFrame para garantir que as colunas necessárias estejam presentes
-            gdf = prepare_gdf(gdf)
+            gdf = prepare_gdf(gdf, area_code, file_path.replace('/tmp/',''))
 
             # Faz o upload para o PostGIS
             upload_to_postgis(gdf, "zona_risco", connection_bonanza_gis)
