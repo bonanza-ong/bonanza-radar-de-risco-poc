@@ -7,27 +7,43 @@ from sqlalchemy import create_engine
 from botocore.exceptions import ClientError
 from urllib.parse import unquote_plus
 from datetime import datetime
+from shapely.geometry import MultiPolygon
 
 connection_bonanza_gis = os.environ.get("connection_bonanza_gis", "")
 
 def prepare_gdf(gdf):
-    # Renomeia a coluna de geometria para 'area_risco' se necessário
+
+    area_risco_gdf = gdf['geometry'].unary_union
+    if not isinstance(area_risco_gdf, MultiPolygon):
+        combined_geometry = MultiPolygon([area_risco_gdf])
+
     if gdf.geometry.name != 'area_risco':
         gdf = gdf.rename_geometry('area_risco')
 
+    nome = 'Nome padrão'
+    em_risco = True
+    descricao = 'Descricao Inicial'
+    created_at = datetime.utcnow()
+
     # Verifica e adiciona a coluna 'nome' se não existir
-    if 'nome' not in gdf.columns:
-        gdf['nome'] = 'Nome padrão'
+    if 'nome' in gdf.columns:
+        nome = gdf.iloc[0]['nome']
 
     # Verifica e adiciona a coluna 'descricao' se não existir
-    if 'descricao' not in gdf.columns:
-        gdf['descricao'] = 'Descrição padrão'
+    if 'descricao' in gdf.columns:
+        descricao = 'Descrição padrão'
 
-    # Verifica e adiciona a coluna 'created_at' se não existir
-    if 'created_at' not in gdf.columns:
-        gdf['created_at'] = datetime.utcnow()
+    new_gdf = gpd.GeoDataFrame({
+        'nome': [nome],
+        'em_risco':[em_risco],
+        'descricao':[descricao],
+        'created_at':[created_at],
+        'area_risco': [combined_geometry]
+    })
 
-    return gdf
+    new_gdf = new_gdf.set_geometry("area_risco", crs=4326)
+
+    return new_gdf
 
 def upload_to_postgis(gdf, table_name, db_connection_string):
     engine = create_engine(db_connection_string, pool_size=10, max_overflow=20, pool_timeout=300, pool_recycle=3600)
