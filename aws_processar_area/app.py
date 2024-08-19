@@ -5,6 +5,7 @@ import uuid
 import os
 from botocore.exceptions import ClientError
 from shapely.geometry import MultiPolygon
+from shapely.ops import unary_union
 from urllib.parse import unquote_plus
 from sqlalchemy import create_engine
 from datetime import datetime
@@ -17,6 +18,7 @@ def prepare_gdf(gdf, area_code, file_key):
     if gdf.geometry.name != 'area_risco':
         gdf = gdf.rename_geometry('area_risco')
 
+    # Define as colunas padrão
     nome = file_key
     em_risco = True
     descricao = file_key
@@ -39,15 +41,41 @@ def prepare_gdf(gdf, area_code, file_key):
     # Define o CRS se não estiver definido
     if gdf.crs is None:
         gdf.set_crs(epsg=4326, inplace=True)
-    elif gdf.crs != 'EPSG:4326':
+    elif gdf.crs.to_string() != 'EPSG:4326':
         gdf = gdf.to_crs(epsg=4326)
 
+    # Corrige geometrias inválidas
+    gdf['area_risco'] = gdf['area_risco'].buffer(0)
+    if not gdf.is_valid.all():
+        gdf['area_risco'] = gdf['area_risco'].apply(lambda geom: geom if geom.is_valid else geom.buffer(0))
+
+    # Mantém apenas as colunas desejadas
+    gdf = gdf[['nome', 'em_risco', 'descricao', 'created_at', 'area_code', 'area_risco']]
+
     return gdf
+
 
 def upload_to_postgis(gdf, table_name, db_connection_string):
     engine = create_engine(db_connection_string, pool_size=10, max_overflow=20, pool_timeout=300, pool_recycle=3600)
     gdf.to_postgis(table_name, engine, if_exists='append', index=False)
     print(f"Upload para a tabela '{table_name}' realizado com sucesso.")
+
+def process_file(file_path, area_code, connection_string):
+    # Carrega o arquivo em um GeoDataFrame usando geopandas
+    file_extension = os.path.splitext(file_path)[1].lower()
+    if file_extension == '.kml':
+        gdf = gpd.read_file(file_path, driver='KML')
+    elif file_extension in ('.geojson', '.shp'):
+        gdf = gpd.read_file(file_path)
+    else:
+        print(f"Extensão de arquivo {file_extension} não suportada. Ignorando {file_path}.")
+        return
+
+    # Prepara o GeoDataFrame
+    gdf = prepare_gdf(gdf, area_code, file_path.replace('/tmp/', ''))
+
+    # Faz o upload para o PostGIS
+    upload_to_postgis(gdf, "zona_risco", connection_string)
 
 def lambda_handler(event, context):
     s3 = boto3.client('s3', region_name="us-east-1")
@@ -84,21 +112,7 @@ def lambda_handler(event, context):
 
         # Processa cada arquivo extraído
         for file_path in extracted_files:
-            file_extension = os.path.splitext(file_path)[1].lower()
-            # Carrega o arquivo em um GeoDataFrame usando geopandas
-            if file_extension == '.kml':
-                gdf = gpd.read_file(file_path, driver='KML')
-            elif file_extension in ('.geojson', '.shp'):
-                gdf = gpd.read_file(file_path)
-            else:
-                print(f"Extensão de arquivo {file_extension} não suportada. Ignorando {file_path}.")
-                continue  # Ignora arquivos com extensões não suportadas
-
-            # Prepara o GeoDataFrame para garantir que as colunas necessárias estejam presentes
-            gdf = prepare_gdf(gdf, area_code, file_path.replace('/tmp/', ''))
-
-            # Faz o upload para o PostGIS
-            upload_to_postgis(gdf, "zona_risco", connection_bonanza_gis)
+            process_file(file_path, area_code, connection_bonanza_gis)
 
         return {
             'statusCode': 200,
