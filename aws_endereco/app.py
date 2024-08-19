@@ -4,9 +4,22 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import scoped_session, sessionmaker
 from datetime import datetime
 from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut
 
 # Obtém a string de conexão do ambiente
 connection_bonanza_gis = os.environ.get("connection_bonanza_gis", "")
+
+def do_geocode(address, attempt=1, max_attempts=5):
+    # Cria o geocodificador
+    geolocator = Nominatim(user_agent="bonanza-endereco-point")
+
+    try:
+        return geolocator.geocode(address)
+    except GeocoderTimedOut:
+        if attempt <= max_attempts:
+            return do_geocode(address, attempt=attempt+1)
+        
+        return None
 
 def lambda_handler(event, context):
     # Carrega o corpo do evento
@@ -22,14 +35,12 @@ def lambda_handler(event, context):
     pais = event_body.get("pais")
     complemento = event_body.get("complemento")
     
-    # Cria o geocodificador
-    geolocator = Nominatim(user_agent="bonanza-endereco-point")
-    
     # Concatena o endereço completo
     full_address = f"{rua}, {numero}, {bairro}, {cidade}, {estado}, {pais}"
 
     # Geocodifica o endereço
-    location = geolocator.geocode(full_address)
+    location = do_geocode(full_address)
+
     if location:
         lat, lon = location.latitude, location.longitude
         print(f"Endereço '{full_address}' geocodificado para Latitude: {lat}, Longitude: {lon}")
