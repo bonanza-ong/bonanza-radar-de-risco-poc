@@ -1,23 +1,19 @@
 import geopandas as gpd
-import boto3
-import os
 import zipfile
+import boto3
 import uuid
-from sqlalchemy import create_engine
+import os
 from botocore.exceptions import ClientError
-from urllib.parse import unquote_plus
-from datetime import datetime
 from shapely.geometry import MultiPolygon
-import uuid
+from urllib.parse import unquote_plus
+from sqlalchemy import create_engine
+from datetime import datetime
 
+# Obtém a string de conexão do ambiente
 connection_bonanza_gis = os.environ.get("connection_bonanza_gis", "")
 
 def prepare_gdf(gdf, area_code, file_key):
-
-    area_risco_gdf = gdf['geometry'].unary_union
-    if not isinstance(area_risco_gdf, MultiPolygon):
-        combined_geometry = MultiPolygon([area_risco_gdf])
-
+    # Renomeia a geometria se necessário
     if gdf.geometry.name != 'area_risco':
         gdf = gdf.rename_geometry('area_risco')
 
@@ -34,18 +30,19 @@ def prepare_gdf(gdf, area_code, file_key):
     if 'descricao' in gdf.columns:
         descricao = gdf.iloc[0]['descricao']
 
-    new_gdf = gpd.GeoDataFrame({
-        'nome': [nome],
-        'em_risco':[em_risco],
-        'descricao':[descricao],
-        'created_at':[created_at],
-        'area_code':[area_code],
-        'area_risco': [combined_geometry]
-    })
+    gdf['nome'] = nome
+    gdf['em_risco'] = em_risco
+    gdf['descricao'] = descricao
+    gdf['created_at'] = created_at
+    gdf['area_code'] = area_code
 
-    new_gdf = new_gdf.set_geometry("area_risco", crs=4326)
+    # Define o CRS se não estiver definido
+    if gdf.crs is None:
+        gdf.set_crs(epsg=4326, inplace=True)
+    elif gdf.crs != 'EPSG:4326':
+        gdf = gdf.to_crs(epsg=4326)
 
-    return new_gdf
+    return gdf
 
 def upload_to_postgis(gdf, table_name, db_connection_string):
     engine = create_engine(db_connection_string, pool_size=10, max_overflow=20, pool_timeout=300, pool_recycle=3600)
@@ -98,7 +95,7 @@ def lambda_handler(event, context):
                 continue  # Ignora arquivos com extensões não suportadas
 
             # Prepara o GeoDataFrame para garantir que as colunas necessárias estejam presentes
-            gdf = prepare_gdf(gdf, area_code, file_path.replace('/tmp/',''))
+            gdf = prepare_gdf(gdf, area_code, file_path.replace('/tmp/', ''))
 
             # Faz o upload para o PostGIS
             upload_to_postgis(gdf, "zona_risco", connection_bonanza_gis)

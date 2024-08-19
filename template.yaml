@@ -165,6 +165,7 @@ Resources:
             - numero
             - cidade
             - estado
+            - complemento
           properties:
             rua:
               type: string
@@ -175,6 +176,12 @@ Resources:
             cidade:
               type: string
             estado:
+              type: string
+            complemento:
+              type: string
+            zip:
+              type: string
+            pais:
               type: string
   EnderecoPost:
       Type: AWS::Serverless::Function
