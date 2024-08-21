@@ -1,14 +1,14 @@
-# AWS Lambda - Processamento de Arquivos Geoespaciais
+# AWS Lambda - Processamento de Arquivos Geoespaciais e Salvamento em Banco de Dados PostGIS
 
 ## Descrição
 
-Esta função AWS Lambda é responsável por processar arquivos geoespaciais (como arquivos KML, GeoJSON e Shapefiles) que são enviados para um bucket S3. A função realiza as seguintes etapas:
+Esta função AWS Lambda processa arquivos geoespaciais e salva os dados em um banco de dados PostGIS. A função realiza as seguintes etapas:
 
-1. Baixa o arquivo do S3.
-2. Descompacta o arquivo, caso ele esteja em formato ZIP.
-3. Carrega o arquivo em um GeoDataFrame (via `geopandas`).
-4. Prepara e padroniza os dados.
-5. Carrega os dados geoespaciais processados em uma tabela PostGIS (`zona_risco`).
+1. **Recebe um evento S3** com um arquivo geoespacial (KML, GeoJSON, SHP ou ZIP contendo esses arquivos).
+2. **Baixa o arquivo do S3** para o ambiente temporário da Lambda.
+3. **Descompacta o arquivo** se for um ZIP e processa os arquivos extraídos.
+4. **Geoprocessa o arquivo** para garantir que esteja no formato correto e adiciona informações adicionais.
+5. **Carrega os dados** para uma tabela chamada `zona_risco` em um banco de dados PostGIS.
 
 ## Pré-requisitos
 
@@ -17,8 +17,8 @@ Esta função AWS Lambda é responsável por processar arquivos geoespaciais (co
 Certifique-se de que sua função Lambda tenha as seguintes dependências instaladas no ambiente:
 
 - `geopandas`
-- `boto3`
 - `shapely`
+- `boto3`
 - `sqlalchemy`
 - `psycopg2-binary`
 
@@ -30,15 +30,17 @@ A função Lambda espera que a string de conexão ao banco de dados PostGIS seja
 
 ## Como Funciona
 
-1. **Evento S3**: A função é acionada por eventos do S3. Quando um arquivo é carregado no bucket S3 configurado, a função Lambda é executada.
-2. **Processamento de Arquivos**: Dependendo do tipo de arquivo (KML, GeoJSON, Shapefile), a função carrega o arquivo em um `GeoDataFrame`, padroniza as colunas, e corrige possíveis problemas de geometria.
-3. **Upload para o PostGIS**: Após o processamento, os dados geoespaciais são carregados na tabela `zona_risco` no banco de dados PostGIS.
+1. **Entrada via Evento S3**: A função é acionada por um evento S3 que contém o nome do bucket e a chave do objeto (o arquivo a ser processado).
+2. **Baixando o Arquivo**: O arquivo é baixado do bucket S3 para o diretório temporário `/tmp/`.
+3. **Processamento de Arquivos**:
+   - Se o arquivo for um ZIP, ele é descompactado e os arquivos extraídos são processados.
+   - Os arquivos suportados (KML, GeoJSON, SHP) são carregados em um GeoDataFrame.
+4. **Preparação dos Dados**: O GeoDataFrame é preparado e validado, e colunas adicionais são adicionadas.
+5. **Upload para PostGIS**: Os dados são carregados na tabela `zona_risco` do banco de dados PostGIS.
 
 ## Entradas
 
-O evento esperado pela função deve seguir o formato padrão de eventos do S3, com informações sobre o bucket e o arquivo carregado.
-
-Exemplo de evento S3:
+O evento esperado pela função S3 deve seguir o formato padrão de notificação de eventos do S3. Exemplo:
 
 ```json
 {
@@ -49,36 +51,46 @@ Exemplo de evento S3:
           "name": "nome-do-bucket"
         },
         "object": {
-          "key": "caminho/do/arquivo.zip"
+          "key": "caminho/para/o/arquivo.zip"
         }
       }
     }
   ]
 }
+```
 
-Saída
+## Saída
+
 A função retorna um objeto JSON com o status da operação. Em caso de sucesso:
 
-json
-Copiar código
+```json
 {
   "statusCode": 200,
-  "body": "Arquivo processado e carregado para a tabela zona_risco."
+  "body": "Arquivo [nome-do-arquivo] processado e carregado para a tabela zona_risco."
 }
+```
+
 Se ocorrer um erro durante o processamento, o status code será 500, com uma mensagem de erro:
 
-json
-Copiar código
+```json
 {
   "statusCode": 500,
   "body": "Erro ao processar o arquivo: [mensagem de erro]"
 }
-Variáveis de Ambiente
-connection_bonanza_gis: String de conexão para o banco de dados PostGIS. Exemplo: postgresql://user:password@host:port/dbname.
-Erros Comuns
-Erro ao Baixar Arquivo do S3: Verifique se o arquivo existe no bucket S3 e se a função Lambda possui as permissões corretas para acessar o bucket.
-Formato de Arquivo Não Suportado: Atualmente, a função suporta apenas arquivos nos formatos .kml, .geojson, .shp, e .zip. Outros formatos serão ignorados.
-Erro de Conexão com o PostGIS: Certifique-se de que a string de conexão esteja correta e que o banco de dados esteja acessível.
-Considerações de Limitação
-Espaço de Armazenamento: O ambiente Lambda oferece um armazenamento temporário de até 512MB no diretório /tmp/. Certifique-se de que o tamanho dos arquivos processados não exceda essa capacidade.
-Timeout: Dependendo do tamanho dos arquivos, o tempo limite da função Lambda pode precisar ser ajustado. O padrão é 3 segundos, mas pode ser configurado para até 15 minutos.
+```
+
+## Variáveis de Ambiente
+
+- `connection_bonanza_gis`: String de conexão para o banco de dados PostGIS. Exemplo: `postgresql://user:password@host:port/dbname`.
+
+## Erros Comuns
+
+- **Erro ao Baixar o Arquivo do S3**: Verifique se a chave do objeto e o bucket estão corretos e se a função Lambda tem permissões apropriadas.
+- **Erro ao Processar o Arquivo**: Verifique a extensão do arquivo e certifique-se de que ele está no formato suportado.
+- **Erro de Conexão com o PostGIS**: Verifique se a string de conexão está correta e se o banco de dados está acessível.
+- **Geometria Inválida**: Se o arquivo contém geometria inválida, a função tentará corrigir isso, mas erros podem ocorrer.
+
+## Considerações de Limitação
+
+- **Limites de Armazenamento Temporário**: A função Lambda tem um limite de armazenamento temporário (/tmp). Certifique-se de que os arquivos não excedam esse limite.
+- **Limites de Tempo de Execução**: Se o processamento ou o upload para o banco de dados levar muito tempo, considere ajustar o tempo limite da função Lambda.
