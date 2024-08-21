@@ -1,118 +1,101 @@
-# AWS Bonanza SAM Project
-
+# POC Área de Risco - Bonanza GIS
 ## Descrição
 
-Este projeto utiliza o AWS Serverless Application Model (SAM) para criar uma aplicação serverless que processa arquivos geoespaciais e realiza geocodificação de endereços. A aplicação inclui:
+O projeto **POC Área de Risco** utiliza o AWS Serverless Application Model (SAM) para configurar e gerenciar uma aplicação serverless dedicada ao processamento e armazenamento de dados geoespaciais. A arquitetura inclui:
 
-1. Uma função Lambda para processar arquivos geoespaciais enviados para um bucket S3 e salvar os dados processados em um banco de dados PostGIS.
-2. Uma função Lambda para geocodificar endereços recebidos via API Gateway e salvar os resultados no banco de dados PostGIS.
-3. Um banco de dados PostgreSQL com extensão PostGIS gerenciado pela AWS RDS.
-4. Um bucket S3 para armazenamento dos arquivos geoespaciais.
-5. Um Secrets Manager para armazenar credenciais sensíveis do banco de dados.
-6. Um API Gateway configurado para gerenciar solicitações HTTP para a função de geocodificação de endereços.
+1. **Banco de Dados RDS PostgreSQL com PostGIS**: Armazena dados geoespaciais.
+2. **Bucket S3**: Armazena arquivos geoespaciais que são processados.
+3. **Funções AWS Lambda**: Processam dados de arquivos e interagem com o banco de dados e o S3.
+4. **API Gateway**: Fornece uma interface para interagir com uma das funções Lambda via HTTP.
 
-## Estrutura do Projeto
+## Arquitetura
 
-O projeto está estruturado da seguinte forma:
+### Recursos
 
-.
-├── aws_processar_area/ # Código da Lambda para processar arquivos geoespaciais
-├── aws_endereco/ # Código da Lambda para geocodificação de endereços
-├── template.yaml # Template AWS SAM
-└── README.md # Este arquivo README
+1. **RDS PostgreSQL Instance** (`RDSInstance`): 
+   - Banco de dados PostgreSQL configurado com a extensão PostGIS.
+   - Armazena dados geoespaciais.
+   - Utiliza a variável de ambiente `DBSecretName` para obter a senha do banco.
 
-markdown
-Copiar código
+2. **Secrets Manager Secret** (`RDSSecret`):
+   - Armazena a senha do banco de dados de forma segura.
+   - É referenciado pelo `RDSInstance` para autenticação.
 
-## Recursos
+3. **S3 Bucket** (`S3Bucket`):
+   - Armazena arquivos geoespaciais a serem processados pelas funções Lambda.
+   - Configurado com a política para permitir acesso às funções Lambda.
 
-O projeto define os seguintes recursos usando o AWS CloudFormation:
+4. **Lambda Execution Role** (`LambdaExecutionRole`):
+   - Permite que as funções Lambda acessem o RDS, Secrets Manager, S3 e CloudWatch Logs.
 
-### 1. Banco de Dados RDS (PostgreSQL com PostGIS)
+5. **Funções Lambda**:
+   - **`ProcessShapefile`**:
+     - Processa arquivos geoespaciais (KML, GeoJSON, SHP, ZIP) armazenados no bucket S3.
+     - Converte e carrega dados para a tabela `zona_risco` no banco de dados PostGIS.
+   - **`EnderecoPost`**:
+     - Recebe dados de endereço via API e os insere na tabela `endereco` no banco de dados PostGIS.
 
-- Um banco de dados PostgreSQL com extensão PostGIS gerenciado pelo AWS RDS.
-- Configuração para autenticação IAM e armazenamento seguro da senha no AWS Secrets Manager.
+6. **API Gateway** (`ApiGatewayApi`):
+   - Fornece uma API REST para a função Lambda `EnderecoPost`.
+   - Requer autenticação por chave de API.
+   - Configurada com um modelo de solicitação para validação dos dados do endereço.
 
-### 2. Bucket S3
+### Parâmetros
 
-- Um bucket S3 chamado `bonanza-gis` para armazenar arquivos geoespaciais que serão processados pela função Lambda.
+- **`DBSecretName`**: Nome do segredo no Secrets Manager que contém a senha do banco de dados.
+- **`DBUsername`**: Nome do usuário do banco de dados.
 
-### 3. Funções Lambda
+### Configuração
 
-- **Processar Arquivos Geoespaciais**: Esta função é acionada quando um novo arquivo é enviado para o bucket S3, processa o arquivo geoespacial e armazena os dados em uma tabela PostGIS.
-- **Geocodificação de Endereços**: Esta função recebe requisições POST através do API Gateway, realiza a geocodificação de endereços usando a biblioteca `geopy` e armazena o resultado no banco de dados PostGIS.
+1. **Banco de Dados RDS**: 
+   - A instância do banco de dados é criada com as configurações especificadas, incluindo o grupo de sub-redes e o grupo de segurança.
 
-### 4. API Gateway
+2. **Secrets Manager**: 
+   - O segredo para a senha do banco é gerado e armazenado no Secrets Manager.
 
-- Uma API REST configurada para gerenciar solicitações HTTP para a função de geocodificação de endereços.
+3. **Bucket S3**: 
+   - O bucket é configurado para armazenar arquivos e permitir o acesso necessário para a função Lambda.
 
-### 5. Secrets Manager
+4. **Funções Lambda**: 
+   - A função `ProcessShapefile` é configurada para ser acionada por eventos de criação de objetos no bucket S3.
+   - A função `EnderecoPost` é configurada para expor uma API via API Gateway.
 
-- Um Secret no AWS Secrets Manager para armazenar as credenciais sensíveis (senha) do banco de dados PostgreSQL.
+5. **API Gateway**: 
+   - Configurado para expor uma API REST com um modelo de solicitação para validação dos dados de entrada.
 
-## Pré-requisitos
+## Como Usar
 
-### Dependências Globais
+### Passo a Passo
 
-Certifique-se de que você tenha o AWS CLI, SAM CLI e Docker instalados na sua máquina para testar e fazer o deploy da aplicação.
+1. **Deploy da Aplicação**:
+   - Use o AWS SAM CLI para implantar a stack.
+     ```bash
+     sam deploy --guided
+     ```
+   - Forneça os parâmetros necessários durante o processo de implantação, como o nome do segredo e o nome de usuário do banco de dados.
 
-- [Instalação do AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
-- [Instalação do AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
-- [Instalação do Docker](https://docs.docker.com/get-docker/)
+2. **Upload de Arquivos para o S3**:
+   - Faça o upload dos arquivos geoespaciais para o bucket S3 (`bonanza-gis`).
+   - A função `ProcessShapefile` será acionada automaticamente para processar esses arquivos.
 
-### Dependências do Projeto
+3. **Interagindo com a API**:
+   - Envie uma solicitação POST para a API Gateway para adicionar um endereço ao banco de dados.
+   - A URL da API será fornecida após o deploy.
 
-As funções Lambda deste projeto utilizam as seguintes dependências Python:
+4. **Monitoramento e Logs**:
+   - Acompanhe os logs das funções Lambda no CloudWatch para monitorar o processamento e depuração.
 
-- **Lambda de Processamento de Arquivos Geoespaciais**:
-  - `geopandas`
-  - `boto3`
-  - `shapely`
-  - `sqlalchemy`
-  - `psycopg2-binary`
+## Variáveis de Ambiente
 
-- **Lambda de Geocodificação de Endereços**:
-  - `sqlalchemy`
-  - `geopy`
-  - `psycopg2-binary`
+- **`connection_bonanza_gis`**: String de conexão para o banco de dados PostGIS, usada pelas funções Lambda. Exemplo: `postgresql://user:password@host:port/dbname`.
 
-Você pode instalar essas dependências no seu ambiente de desenvolvimento com o `pip` ou incluir as bibliotecas necessárias nas camadas Lambda.
+## Erros Comuns
 
-## Como Executar
+- **Erro ao Acessar o RDS**: Verifique as permissões do grupo de segurança e a string de conexão.
+- **Erro ao Processar Arquivos**: Verifique os arquivos e formatos suportados.
+- **Erro na API**: Verifique a configuração da API Gateway e as permissões da função Lambda.
 
-### 1. Clonar o Repositório
+## Considerações de Limitação
 
-Clone o repositório para o seu ambiente de desenvolvimento local:
-
-```bash
-git clone https://github.com/seu-usuario/aws_bonanza_sam.git
-cd aws_bonanza_sam
-2. Instalar Dependências
-Instale as dependências Python necessárias para as funções Lambda:
-
-bash
-Copiar código
-pip install -r aws_processar_area/requirements.txt -t aws_processar_area/
-pip install -r aws_endereco/requirements.txt -t aws_endereco/
-3. Configuração de Variáveis de Ambiente
-Certifique-se de configurar as seguintes variáveis de ambiente no AWS Lambda:
-
-connection_bonanza_gis: String de conexão para o banco de dados PostGIS. Exemplo: postgresql://user:password@host:port/dbname.
-4. Testar Localmente
-Você pode testar a aplicação localmente usando o SAM CLI:
-
-bash
-Copiar código
-sam local start-api
-5. Deploy para AWS
-Faça o deploy da aplicação para a AWS usando o SAM CLI:
-
-bash
-Copiar código
-sam deploy --guided
-Siga as instruções para configurar o deploy, incluindo a definição dos parâmetros como DBSecretName e DBUsername.
-
-Considerações de Segurança
-Segurança do Banco de Dados: Certifique-se de que a configuração de segurança do grupo de segurança do RDS esteja adequada, permitindo acesso apenas de IPs confiáveis.
-Gerenciamento de Segredos: Use o AWS Secrets Manager para armazenar credenciais sensíveis, como a senha do banco de dados.
-Permissões IAM: As permissões IAM para as funções Lambda estão configuradas para permitir acesso mínimo necessário aos recursos, incluindo RDS, S3 e Secrets Manager.
+- **Limites de Tamanho do Arquivo**: A função Lambda possui um limite de tamanho de arquivo que pode processar no diretório `/tmp`.
+- **Limites de Tempo de Execução**: Ajuste o tempo limite da função Lambda conforme necessário para processar arquivos grandes ou operações complexas.
